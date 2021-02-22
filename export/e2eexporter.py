@@ -7,9 +7,11 @@ from oct_converter.image_types import FundusImageWithMetaData
 
 class LogProcessor:
     def __init__(self, filepath):
-        assert os.path.exists(filepath)
-        with open(filepath) as fp:
-            self.log = fp.readlines()
+        self.use_log = filepath is not None
+        if self.use_log:
+            assert os.path.exists(filepath)
+            with open(filepath) as fp:
+                self.log = fp.readlines()
 
     def get_log_index(self, key):
         for i, line in enumerate(self.log):
@@ -28,10 +30,16 @@ class LogProcessor:
             return line.split('HRA ')[1][:10]
 
     def patient_from_filename(self, filename):
-        return self.extract_patient_name(self.get_log_index(filename))
+        if self.use_log:
+            return self.extract_patient_name(self.get_log_index(filename))
+        else:
+            return ['', '']
 
     def visit_date_from_filename(self, filename):
-        return self.extract_visit_date(self.get_log_index(filename))
+        if self.use_log:
+            return self.extract_visit_date(self.get_log_index(filename))
+        else:
+            return ''
 
     def extract_patient_id(self, index):
         line = self.log[index]
@@ -39,18 +47,24 @@ class LogProcessor:
         return id
 
     def id_from_filename(self, filename):
-        return self.extract_patient_id(self.get_log_index(filename))
+        if self.use_log:
+            return self.extract_patient_id(self.get_log_index(filename))
+        else:
+            return ''
 
 
 class E2EExporter:
     def __init__(self, config):
 
         e2e_dirpath = os.path.split(config['input']['spectralis'])
-        log_filepath = os.path.split(config['input']['spectralis_log_filename'])
-        if not log_filepath[0]:
-            log_filepath = os.path.join(e2e_dirpath[0], log_filepath[1])
-        else:
-            log_filepath = config['input']['spectralis_log_filename']
+        log_filepath = config['input']['spectralis_log_filename']
+
+        if log_filepath is not None:
+            log_filepath = os.path.split()
+            if not log_filepath[0]:
+                log_filepath = os.path.join(e2e_dirpath[0], log_filepath[1])
+            else:
+                log_filepath = config['input']['spectralis_log_filename']
 
         self.log = LogProcessor(log_filepath)
         self.dirpath = e2e_dirpath[0]
@@ -68,12 +82,17 @@ class E2EExporter:
             print('Found %i .e2e file(s)' % len(self.files))
 
     def export(self):
-        for f in tqdm(self.files):
+        for i, f in tqdm(enumerate(self.files)):
             if f.lower().endswith('.e2e'):
                 patient = self.log.patient_from_filename(f)
                 patient_id = self.log.id_from_filename(f)
                 visit_date = self.log.visit_date_from_filename(f).replace('/', '-')
-                folder = os.path.join(self.output, str(patient_id)+' '+patient[0]+', '+patient[1]+'/'+visit_date+'/')
+                if self.log.use_log:
+                    folder = os.path.join(self.output, str(patient_id)+' '+patient[0]+', '+patient[1]+'/'+visit_date+'/')
+                else:
+                    base = os.path.basename(f)
+                    file, ext = os.path.splitext(base)
+                    folder = os.path.join(self.output, file)
                 if os.path.exists(folder) and not self.overwrite:
                     print('Skipping folder %s'%folder)
                     continue
@@ -105,6 +124,9 @@ if __name__ == '__main__':
     parser.add_argument("-v", "--verbosity", help="increase output verbosity", action="store_true", default=True)
     parser.add_argument("-o", "--output", help="output folder path", default="export/")
     parser.add_argument("-ow", "--overwrite", help="Overwrite existing file", default=False, action='store_true')
+    parser.add_argument("-nl", "--no_log", help="increase output verbosity", action="store_true", default=False)
+    parser.add_argument("-eo", "--export_in_origin_folder", help="Export in the origin folder", action="store_true",
+                        default=False)
 
     parser.add_argument("-l", "--log",
                         help="Path of the log file used to reconstruct the patient forder. \
@@ -112,13 +134,19 @@ if __name__ == '__main__':
 
     parser.add_argument("-f", "--format", help="export format", default=".png")
 
+
     args = parser.parse_args()
+    no_log = args.no_log
+    export_origin_folder = args.export_in_origin_folder
     e2e_dirpath = os.path.split(args.dir)
     log_filepath = os.path.split(args.log)
-    if not log_filepath[0]:
-        log_filepath = os.path.join(e2e_dirpath[0], log_filepath[1])
+    if no_log:
+        log_filepath = None
     else:
-        log_filepath = args.log
+        if not log_filepath[0]:
+            log_filepath = os.path.join(e2e_dirpath[0], log_filepath[1])
+        else:
+            log_filepath = args.log
 
     config = {}
     config['input'] = {}
@@ -128,7 +156,10 @@ if __name__ == '__main__':
     config['input']['spectralis'] = args.dir
     config['input']['spectralis_log_filename'] = log_filepath
     config['export']['format'] = args.format
-    config['export']['output_folder'] = args.output
+    if export_origin_folder:
+        config['export']['output_folder'] = os.path.split(args.dir)[0]
+    else:
+        config['export']['output_folder'] = args.output
     config['export']['overwrite'] = args.overwrite
     config['options']['verbose'] = args.verbosity
 
